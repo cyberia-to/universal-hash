@@ -1,76 +1,12 @@
-[package]
-name = "uhash-prover"
-version = "0.1.0"
-edition = "2021"
-authors = ["Cyberia"]
-description = "UniversalHash proof-of-work miner for Bostrom blockchain"
-repository = "https://github.com/cyberia-to/universal-hash"
-license = "Unlicense"
-readme = "README.md"
-
-[lib]
-name = "uhash"
-path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "uhash"
-path = "src/main.rs"
-
-[features]
-default = ["cli"]
-cli = ["clap", "tokio/rt-multi-thread", "num_cpus", "dirs"]
-wasm = ["wasm-bindgen", "console_error_panic_hook"]
-
-[dependencies]
-# Core algorithm (shared with verifier contract)
-uhash-core = "0.2"
-
-# Error handling
-thiserror = "1.0"
-anyhow = "1.0"
-
-# Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Hex encoding
-hex = "0.4"
-
-# Random number generation
-getrandom = "0.2"
-
-# Wallet
-bip32 = "0.5"
-bip39 = "2.0"
-cosmrs = "0.16"
-
-# Async runtime
-tokio = { version = "1.35", features = ["rt", "macros", "time"] }
-
-# RPC
-tendermint-rpc = { version = "0.35", features = ["http-client"] }
-
-# CLI (optional)
-clap = { version = "4.4", features = ["derive"], optional = true }
-num_cpus = { version = "1.16", optional = true }
-dirs = { version = "5.0", optional = true }
-
-# WASM support (optional)
-wasm-bindgen = { version = "0.2", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
-
-[dev-dependencies]
-criterion = "0.5"
-
-[[bench]]
-name = "uhash_bench"
-harness = false
+[workspace]
+members = ["crates/cli", "crates/core", "crates/web", "crates/demo/src-tauri"]
+resolver = "2"
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 opt-level = 3
+
+[profile.bench]
+lto = "fat"
+codegen-units = 1

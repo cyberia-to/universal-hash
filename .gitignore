@@ -1,6 +1,6 @@
 # Build
 /target
-Cargo.lock
+**/target/
 
 # IDE
 .idea/
@@ -16,3 +16,16 @@ Thumbs.db
 
 # Claude context (project-specific)
 .claude/
+
+# Tauri generated (platform-specific, contains local paths)
+crates/demo/src-tauri/gen/
+
+# Web build
+crates/web/pkg/
+
+# iOS test artifacts
+**/*.xcuserstate
+**/xcuserdata/
+
+# Logs
+*.log
