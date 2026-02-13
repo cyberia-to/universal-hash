@@ -2,6 +2,10 @@
 /target
 **/target/
 
+# Local cargo config (contains target-cpu=native, breaks CI)
+# Copy .cargo/config.toml.example to .cargo/config.toml for local perf
+.cargo/config.toml
+
 # IDE
 .idea/
 .vscode/
