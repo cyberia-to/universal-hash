@@ -1,0 +1,18 @@
+# Build
+/target
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Meeting transcripts (private)
+*.txt
+
+# Claude context (project-specific)
+.claude/
