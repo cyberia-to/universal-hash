@@ -28,10 +28,6 @@ jobs:
             artifact: uhash-linux-arm64
             cross: true
 
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact: uhash-macos-x64
-
           - target: aarch64-apple-darwin
             os: macos-14
             artifact: uhash-macos-arm64
@@ -59,7 +55,7 @@ jobs:
 
       - name: Build (cross)
         if: matrix.cross
-        run: cross build --release --target ${{ matrix.target }}
+        run: cross build --release --target ${{ matrix.target }} --features vendored-openssl
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
@@ -136,9 +132,6 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             name: macOS-ARM64
-          - platform: macos-14
-            target: x86_64-apple-darwin
-            name: macOS-x64
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             name: Linux-x64
