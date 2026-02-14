@@ -181,7 +181,64 @@ Test your device's hashrate without mining:
 uhash benchmark --count 1000
 ```
 
-## Browser Mining
+## Cyb App Mining
+
+The [Cyb app](https://cyb.ai) includes a built-in mining dashboard available on all platforms:
+
+### Desktop (macOS, Linux, Windows)
+
+1. Download and install the Cyb desktop app
+2. Connect your wallet (import or create mnemonic)
+3. Navigate to `/mining`
+4. Click **Start Mining**
+
+Native hashrates:
+- Mac M1/M2: ~1,420 H/s
+
+### iOS
+
+1. Build from source: `APPLE_DEVELOPMENT_TEAM=<TEAM_ID> npx @tauri-apps/cli ios build`
+2. Install the `.ipa` via Xcode or `xcrun devicectl`
+3. Open the app, tap **Connect** at the bottom, go to Keys, and import your mnemonic
+4. Navigate to `/mining` and start mining
+
+Native hashrates:
+- iPhone 14 Pro: ~900 H/s
+
+### Android
+
+1. Build from source (aarch64 only — 32-bit ARM is not supported):
+   ```bash
+   export ANDROID_HOME="$HOME/Library/Android/sdk"
+   export NDK_HOME="$ANDROID_HOME/ndk/<version>"
+   export JAVA_HOME="<path-to-jdk17>"
+   npx @tauri-apps/cli android build --apk --target aarch64
+   ```
+2. Sign the APK:
+   ```bash
+   zipalign -f 4 app-universal-release-unsigned.apk aligned.apk
+   apksigner sign --ks release.keystore --out cyb-signed.apk aligned.apk
+   ```
+3. Install: `adb install cyb-signed.apk`
+4. Open the app, connect wallet via mnemonic import, navigate to `/mining`
+
+Native hashrates:
+- Galaxy A56 5G: ~400 H/s
+
+### Mining Dashboard Features
+
+The mining page shows:
+- Real-time hashrate with sparkline chart
+- LI tokens mined this session
+- Estimated LI per hour
+- Proof log with clickable TX explorer links
+- Thread selector (adjust CPU cores used)
+- Wallet LI balance (auto-refreshes)
+- Active miner count on the network
+
+Mining runs continuously — proof submission happens asynchronously without interrupting hashing. Mining also continues in the background when navigating to other pages.
+
+## Browser Mining (WASM)
 
 UniversalHash also supports mining directly in your browser via WASM. Visit the [Cyb app](https://cyb.ai) or try the [demo benchmark](https://github.com/cyberia-to/universal-hash/tree/dev/crates/demo).
 

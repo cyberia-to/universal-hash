@@ -223,16 +223,19 @@ Local: `/Users/michaelborisov/Develop/cyb-ts`
 | 4.3 | Miner getting-started guide | ✅ Done | `docs/mining-guide.md` |
 | 4.4 | Period rename in prover response types | ✅ Done | `period_duration` field, error message fix |
 
-### Phase 5: Frontend (cyb-ts) - Priority P2
+### Phase 5: Frontend (cyb-ts) - 🔄 In Progress
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 5.1 | Create mining page | 🔄 Partial | Benchmark page at `crates/demo/dist/` |
+| 5.1 | Create mining page | ✅ Done | Full dashboard with hero hashrate, sparkline, stat cards, proof log |
 | 5.2 | Integrate WASM prover | ✅ Done | wasm-bindgen wrapper working |
-| 5.3 | Display hashrate | ✅ Done | Real-time in benchmark page |
-| 5.4 | Display transaction history | ❌ | Past proofs submitted |
-| 5.5 | Display rewards earned | ❌ | Total LI mined |
+| 5.3 | Display hashrate | ✅ Done | Hero display with pulse animation + SVG sparkline chart |
+| 5.4 | Display transaction history | ✅ Done | Proof log with TX explorer links, OK/FAIL pills, relative timestamps |
+| 5.5 | Display rewards earned | ✅ Done | Session LI mined + LI balance + Est. LI/hr from contract query |
 | 5.6 | Display peer count estimate | ❌ | Similar devices mining (from difficulty) |
+| 5.7 | Thread selector | ✅ Done | Range input for CPU core count, disabled during mining |
 | 5.8 | Tauri native builds | ✅ Done | macOS .dmg, iOS .ipa, Android .apk |
+| 5.9 | Mining state persistence | ✅ Done | localStorage for proof log + session LI; on-mount recovery from Rust backend |
+| 5.10 | Hash input format fix | ✅ Done | Binary structured input matching contract (seed_bytes+addr+ts_LE+nonce_LE) |
 
 ### Phase 6: Polish & Documentation - Priority P3
 | # | Task | Status | Notes |
@@ -260,7 +263,8 @@ Phase 2 (Prover) ──┼──> Phase 3 (Contract) ──────┼──
 2. ~~Prover (Phase 2)~~ - ✅ DONE - all commands, all platforms verified
 3. ~~Contract (Phase 3)~~ - ✅ DONE - all tasks including bug fixes + epoch→period rename, 33 unit tests, on-chain verified (Code ID 48)
 4. ~~Validator config (Phase 4)~~ - ✅ DONE - zero-fee CLI, `--contract`/`--fee` flags, validator + miner docs
-5. **Next**: Frontend (Phase 5) or Documentation (Phase 6)
+5. ~~Frontend (Phase 5)~~ - 🔄 IN PROGRESS - Mining dashboard UI complete, end-to-end mining verified on-chain, peer count estimate remaining
+6. **Next**: Peer count estimate (5.6) or Documentation (Phase 6)
 
 ---
 

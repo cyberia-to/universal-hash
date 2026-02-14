@@ -2,6 +2,54 @@
 
 All notable changes to uhash-core will be documented in this file.
 
+## [0.2.5] - 2026-02-15
+
+### Added
+
+- **iOS build** (cyb-ts): Full Tauri v2 iOS support
+  - Platform-specific config (`tauri.ios.conf.json`) — single window, no splash screen
+  - Desktop/mobile code split with `#[cfg(desktop)]` guards
+  - Heavy backend disabled on mobile (CozoDb, IPFS, ML embeddings, sync loops, Rune engine)
+  - Mining-only invoke handler on mobile (no IPFS commands)
+- **Android build** (cyb-ts): Tauri v2 Android APK support (aarch64 only)
+  - Platform-specific config (`tauri.android.conf.json`)
+  - Desktop-only deps gated with `cfg(not(any(target_os = "android", target_os = "ios")))` — avoids OpenSSL/RocksDB cross-compilation
+  - BuildTask.kt fix: `npx @tauri-apps/cli` instead of `npm run tauri`
+- **Continuous mining**: Mining no longer pauses during proof submission
+  - Native (Rust): `pending_proofs: Vec<FoundProof>` queue, new `take_proofs` command drains queue
+  - WASM: Workers keep hashing after finding proof, proofs queued in `pendingProofs[]`
+  - Mining.tsx: Polling loop drains proof queue, submits async (fire-and-forget)
+- **Network stats**: `useMinerStats` hook queries on-chain `{ stats: {} }` for unique miner count
+- **Mobile wallet connection**: "Connect wallet" button on Tauri mobile (replaces "choose address in keplr")
+- **Safe area support**: `viewport-fit=cover` + `env(safe-area-inset-*)` on header, footer, action bars, modals
+- **Responsive modals**: ConnectWalletModal responsive for phone screens (auto-fill mnemonic grid, max-width constraints)
+
+### Changed
+
+- Mining docs updated with iOS/Android build instructions and continuous mining note
+
+## [0.2.4] - 2026-02-14
+
+### Added
+
+- **Mining dashboard UI** (cyb-ts): Full-featured mining page with:
+  - Hero hashrate display with CSS pulse glow animation
+  - SVG sparkline chart showing rolling hashrate history
+  - 4-card stat grid: LI Mined, Proofs, Est. LI/hr, Elapsed
+  - LI wallet balance (polled every 30s)
+  - Reward estimate from on-chain `calculate_reward` query
+  - Thread selector (range input for CPU core count)
+  - Proof log with TX explorer links, OK/FAIL status pills, relative timestamps
+  - Wallet address display with copy button + Mining/Idle status pill
+- **Mining state persistence**: Proof log and session LI saved to localStorage; on-mount recovery detects active mining in Rust backend
+- **New hooks**: `useLiBalance`, `useRewardEstimate`, `useHashrateSamples`
+- **New components**: `HashrateHero`, `StatCard`, `ProofLogEntry`, `ThreadSelector`
+
+### Fixed
+
+- **Hash input format** (critical): Tauri miner now builds hash input as binary structured bytes (`seed_raw_32B + address_utf8 + timestamp_8B_LE + nonce_8B_LE`) matching the on-chain contract verification exactly. Previously used string concatenation which produced different hashes.
+- **Gas limit**: Increased from 600k (`fee(3)`) to 1.6M (`fee(8)`) for `submit_proof` transactions. On-chain hash verification requires more gas than the previous limit allowed.
+
 ## [0.2.3] - 2026-02-12
 
 ### Added
