@@ -85,7 +85,7 @@ jobs:
             ${{ matrix.artifact }}.zip
           if-no-files-found: ignore
 
-  # Build WASM package
+  # Build WASM package and publish to npm
   build-wasm:
     runs-on: ubuntu-latest
     name: Build WASM
@@ -98,18 +98,26 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
-      - name: Build WASM
+      - name: Build WASM (wasm-pack)
+        run: wasm-pack build crates/web --target web --release
+
+      - name: Publish to npm
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          cargo build -p uhash-web --release --target wasm32-unknown-unknown
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > crates/web/pkg/.npmrc
+          wasm-pack publish crates/web
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create WASM archive (demo)
+        run: |
           mkdir -p crates/demo/dist/wasm
-          wasm-bindgen target/wasm32-unknown-unknown/release/uhash_web.wasm \
-            --out-dir crates/demo/dist/wasm --target web
-
-      - name: Create WASM archive
-        run: |
+          cp crates/web/pkg/uhash_web.js crates/demo/dist/wasm/
+          cp crates/web/pkg/uhash_web_bg.wasm crates/demo/dist/wasm/
+          cp crates/web/pkg/uhash_web.d.ts crates/demo/dist/wasm/
           cd crates/demo/dist
           zip -r ../../uhash-wasm.zip wasm/ index.html
 

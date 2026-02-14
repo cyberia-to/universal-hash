@@ -2,6 +2,9 @@
 name = "uhash-web"
 version = "0.1.0"
 edition = "2024"
+description = "UniversalHash proof-of-work algorithm - WASM bindings for browser mining"
+license = "MIT"
+repository = "https://github.com/cyberia-to/universal-hash"
 
 [lib]
 crate-type = ["cdylib"]
@@ -11,3 +14,4 @@ uhash-core = { path = "../core", default-features = false }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["console", "Performance", "Window"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
+hex = "0.4"
