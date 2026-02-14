@@ -7,8 +7,8 @@
 ### Core Vision
 - **Democratic Mining**: Phone-to-desktop ratio of 1:3-5 (vs 1:50-100+ in traditional PoW)
 - **ASIC Resistance**: Multi-primitive design makes specialized hardware economically infeasible
-- **Permissionless Entry**: New miners can participate with zero tokens (gas deducted from rewards)
-- **Pool-less Design**: Proportional epoch rewards eliminate need for mining pools
+- **Permissionless Entry**: New miners can participate with zero tokens (Bostrom zero-fee transactions)
+- **Pool-less Design**: Proportional sliding rewards eliminate need for mining pools
 
 ---
 
@@ -22,13 +22,15 @@
 
 **Key Functions**:
 - `verify_pow_proof()` - Validate submitted hash meets difficulty
-- `compute_min_profitable_difficulty()` - Anti-spam threshold based on gas market
-- `settle_epoch()` - Distribute rewards proportionally to difficulty-weighted work
+- `calculate_sliding_reward()` - Proportional reward via Uint256 math
+- `maybe_advance_period()` - Seed rotation + dynamic difficulty adjustment
+- `estimate_total_work()` - Shared extrapolation for execute + queries
+- `migrate()` - Storage migration entry point
 
 **Integration Points**:
 - Uses `cyber-std` bindings for Bostrom blockchain interactions
 - Token minting via TokenFactory module bindings
-- Epoch-based reward distribution (10-minute epochs default)
+- Period-based seed rotation (10-minute periods default, "period" replaces "epoch")
 
 ### 2. Prover (Standalone Rust Binary)
 **Location**: `/Users/michaelborisov/Develop/universal-hash`
@@ -80,20 +82,22 @@
 ### Simplified Economic Model (No Epoching in Consensus)
 Instead of batch epoch settlements requiring consensus changes:
 - **Sliding reward calculation**: Pay immediately when valid proof arrives
-- **Dynamic difficulty**: Adjusted based on rolling hashrate estimates
-- **Gas-deducted rewards**: `net_reward = gross_reward - gas_cost`
+- **Dynamic difficulty**: Adjusted based on rolling hashrate estimates (integer-only math)
+- **Zero-fee transactions**: Bostrom natively supports zero-fee txs; miners need no BOOT tokens
+- **Estimated gas cost**: Contract's `estimated_gas_cost_uboot` is purely informational for profitability assessment
 
 ### Self-Authenticating Proofs
 ```
-hash = UniversalHash(epoch_seed || miner_address || timestamp || nonce)
+hash = UniversalHash(period_seed || miner_address || timestamp || nonce)
 ```
 - No signature required - changing miner_address invalidates hash
 - Enables zero-token mining for new participants
 
 ### Validator Configuration
-Validators need to accept special PoW proof transactions without upfront gas:
-- Gas deducted from minted rewards at settlement
+Bostrom validators natively accept zero-fee transactions (`minimum-gas-prices = "0boot"`):
+- No special configuration needed for most validators
 - `min_profitable_difficulty` threshold prevents spam
+- See `docs/validator-configuration.md` for details
 
 ---
 
@@ -205,16 +209,19 @@ Local: `/Users/michaelborisov/Develop/cyb-ts`
 | 3.3 | Self-authenticating proof format | ✅ Done | Address in hash input |
 | 3.4 | TokenFactory integration | ✅ Done | CyberMsg::mint_contract_tokens |
 | 3.5 | Sliding reward calculation | ✅ Done | Immediate payout on valid proof |
-| 3.6 | Dynamic difficulty calculation | ✅ Done | Auto-adjusts on epoch boundaries, clamped 4x |
-| 3.7 | `min_profitable_difficulty` threshold | ✅ Done | `ceil(log2(total_work / base_reward))` from rolling window, 30 unit tests |
+| 3.6 | Dynamic difficulty calculation | ✅ Done | Auto-adjusts on period boundaries, integer-only math, empty periods decrease difficulty |
+| 3.7 | `min_profitable_difficulty` threshold | ✅ Done | `ceil(log2(total_work / base_reward))` from rolling window, 33 unit tests |
 | 3.8 | Gas cost estimation | ✅ Done | Admin-set `estimated_gas_cost_uboot` (default 250k boot), returned in CalculateReward |
-| 3.9 | Deploy to Bostrom mainnet | ✅ Done | Production: Code ID 45, Test (with 3.7/3.8): Code ID 46 |
+| 3.9 | Deploy to Bostrom mainnet | ✅ Done | Production: Code ID 45, Test (with bug fixes + renames): Code ID 48 |
+| 3.10 | Bug fixes + epoch→period rename | ✅ Done | Uint256 overflow fix, integer math, migrate entry point, PR #46 |
 
-### Phase 4: Validator Configuration - Priority P1
+### Phase 4: Validator Configuration - ✅ Complete
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 4.1 | Document gas-free PoW tx mechanism | ❌ | Validators accept proofs without upfront gas |
-| 4.2 | Validator config instructions | ❌ | How to enable PoW proof acceptance |
+| 4.1 | Zero-fee prover CLI + `--contract`/`--fee` flags | ✅ Done | Fee 0 boot, gas 600k, configurable contract |
+| 4.2 | Validator config documentation | ✅ Done | `docs/validator-configuration.md` |
+| 4.3 | Miner getting-started guide | ✅ Done | `docs/mining-guide.md` |
+| 4.4 | Period rename in prover response types | ✅ Done | `period_duration` field, error message fix |
 
 ### Phase 5: Frontend (cyb-ts) - Priority P2
 | # | Task | Status | Notes |
@@ -225,13 +232,12 @@ Local: `/Users/michaelborisov/Develop/cyb-ts`
 | 5.4 | Display transaction history | ❌ | Past proofs submitted |
 | 5.5 | Display rewards earned | ❌ | Total LI mined |
 | 5.6 | Display peer count estimate | ❌ | Similar devices mining (from difficulty) |
-| 5.7 | Fix contract listing UI | ❌ | Currently broken |
 | 5.8 | Tauri native builds | ✅ Done | macOS .dmg, iOS .ipa, Android .apk |
 
 ### Phase 6: Polish & Documentation - Priority P3
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 6.1 | Prover documentation | ❌ | README, usage examples |
+| 6.1 | Prover documentation | ✅ Done | `docs/mining-guide.md` |
 | 6.2 | Contract documentation | ❌ | API reference |
 | 6.3 | Integration guide | ❌ | How to add mining to apps |
 | 6.4 | Economic model documentation | ❌ | Reward calculation explained |
@@ -252,8 +258,9 @@ Phase 2 (Prover) ──┼──> Phase 3 (Contract) ──────┼──
 **Critical Path**:
 1. ~~Optimization (O1-O3)~~ - ✅ DONE - achieved 1,420 H/s native, 100-400 H/s WASM
 2. ~~Prover (Phase 2)~~ - ✅ DONE - all commands, all platforms verified
-3. ~~Contract deployment (3.9)~~ - ✅ DONE → Gas oracle (3.7-3.8) → Validator config (4.1-4.2)
-4. **Next**: Gas oracle integration (3.7-3.8) or Frontend (5.x) in parallel
+3. ~~Contract (Phase 3)~~ - ✅ DONE - all tasks including bug fixes + epoch→period rename, 33 unit tests, on-chain verified (Code ID 48)
+4. ~~Validator config (Phase 4)~~ - ✅ DONE - zero-fee CLI, `--contract`/`--fee` flags, validator + miner docs
+5. **Next**: Frontend (Phase 5) or Documentation (Phase 6)
 
 ---
 
@@ -276,8 +283,8 @@ The LI (Lithium) token will be minted through this module.
 ### LI Token (Lithium) - DEPLOYED
 - **Symbol:** LI
 - **Full denom:** `factory/bostrom1qwys5wj3r4lry7dl74ukn5unhdpa6t397h097q36dqvrp5qgvjxqverdlf/li`
-- **Contract:** `bostrom1qwys5wj3r4lry7dl74ukn5unhdpa6t397h097q36dqvrp5qgvjxqverdlf`
-- **Code ID:** 45
+- **Production Contract:** `bostrom1qwys5wj3r4lry7dl74ukn5unhdpa6t397h097q36dqvrp5qgvjxqverdlf` (Code ID 45)
+- **Test Contract:** `bostrom1520mkjwwda7mtvf5wkztyjup2hh4ws26zdhqg0sg86wnxjms5h5s88clqm` (Code ID 48)
 - **Creation:** Automatic on contract instantiation
 - **Minting:** On valid PoW proof submission
 - **Purpose:** Democratic proof-of-work rewards for miners
@@ -377,7 +384,11 @@ docker run --rm -v "$(pwd)":/code \
   cosmwasm/optimizer:0.16.0 ./contracts/cw-universal-hash
 ```
 
-**IMPORTANT**: uhash-core uses `edition = "2024"` but optimizer has Rust 1.78. Must temporarily change to `edition = "2021"` for contract WASM builds, then change back.
+**IMPORTANT**: Two temporary changes needed for Docker optimizer builds:
+1. uhash-core `edition = "2024"` → `"2021"` (optimizer has Rust 1.78)
+2. Contract Cargo.toml uhash-core path `../../../universal-hash/crates/core` → `/uhash-core`
+
+Change both back after the build completes.
 
 ---
 

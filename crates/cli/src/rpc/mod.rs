@@ -30,6 +30,8 @@ pub struct RpcConfig {
     pub chain_id: String,
     /// Contract address for UniversalHash verifier
     pub contract_address: String,
+    /// Fee amount in uboot (default: 0 for zero-fee Bostrom transactions)
+    pub fee_amount: u128,
 }
 
 impl Default for RpcConfig {
@@ -39,6 +41,7 @@ impl Default for RpcConfig {
             lcd_url: DEFAULT_LCD.to_string(),
             chain_id: "bostrom".to_string(),
             contract_address: CONTRACT_ADDRESS.to_string(),
+            fee_amount: 0,
         }
     }
 }
@@ -96,6 +99,7 @@ pub struct ConfigResponse {
     pub difficulty: u32,
     pub base_reward: String,
     pub max_proof_age: u64,
+    pub period_duration: u64,
     pub admin: String,
     pub paused: bool,
 }
@@ -249,16 +253,16 @@ impl RpcClient {
         // Build transaction body
         let body = Body::new(vec![msg_any], "", 0u32);
 
-        // Build auth info with fee
+        // Build auth info with fee (default 0 for Bostrom zero-fee transactions)
         let denom: cosmrs::Denom = "boot"
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid denom: {}", e))?;
         let fee = Fee::from_amount_and_gas(
             Coin {
                 denom,
-                amount: 250000u128,
+                amount: self.config.fee_amount,
             },
-            20000000u64,
+            600000u64,
         );
 
         let signer_info = SignerInfo::single_direct(Some(signing_key.public_key()), sequence);
@@ -309,7 +313,7 @@ impl RpcClient {
 
         let seed_hex = resp["data"]["seed"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid epoch seed response"))?;
+            .ok_or_else(|| anyhow::anyhow!("Invalid seed response"))?;
 
         let seed_bytes = hex::decode(seed_hex)?;
         let mut seed = [0u8; 32];

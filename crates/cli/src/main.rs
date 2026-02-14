@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use uhash::rpc::{ProofSubmission, RpcClient, CONTRACT_ADDRESS};
+use uhash::rpc::{ProofSubmission, RpcClient};
 use uhash::wallet::{default_wallet_path, ensure_wallet_dir, Wallet};
 use uhash::{meets_difficulty, UniversalHash};
 
@@ -32,6 +32,14 @@ struct Cli {
     /// Custom RPC endpoint
     #[arg(long, global = true)]
     rpc: Option<String>,
+
+    /// Custom contract address (default: production contract)
+    #[arg(long, global = true)]
+    contract: Option<String>,
+
+    /// Transaction fee in uboot (default: 0 for zero-fee Bostrom transactions)
+    #[arg(long, global = true, default_value = "0")]
+    fee: u128,
 
     /// Custom wallet file path
     #[arg(long, global = true)]
@@ -97,17 +105,19 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
+    let rpc_config = build_rpc_config(cli.rpc.as_deref(), cli.contract.as_deref(), cli.fee);
+
     let result = match cli.command {
         Commands::Mine {
             threads,
             difficulty,
             no_submit,
-        } => cmd_mine(threads, difficulty, no_submit, cli.rpc.clone()),
+        } => cmd_mine(threads, difficulty, no_submit, &rpc_config),
         Commands::Send {
             hash,
             nonce,
             timestamp,
-        } => cmd_send(&hash, nonce, timestamp, cli.rpc),
+        } => cmd_send(&hash, nonce, timestamp, &rpc_config),
         Commands::ImportMnemonic { phrase } => cmd_import_mnemonic(phrase, cli.wallet),
         Commands::ExportMnemonic => cmd_export_mnemonic(cli.wallet),
         Commands::NewWallet => cmd_new_wallet(cli.wallet),
@@ -121,6 +131,24 @@ fn main() {
     }
 }
 
+/// Build RPC config from CLI args
+fn build_rpc_config(
+    rpc_url: Option<&str>,
+    contract: Option<&str>,
+    fee: u128,
+) -> uhash::rpc::RpcConfig {
+    let mut config = uhash::rpc::RpcConfig::default();
+    if let Some(url) = rpc_url {
+        config.rpc_url = url.to_string();
+        config.lcd_url = url.replace("rpc", "lcd");
+    }
+    if let Some(addr) = contract {
+        config.contract_address = addr.to_string();
+    }
+    config.fee_amount = fee;
+    config
+}
+
 /// A valid proof found by a mining thread
 struct FoundProof {
     hash: Vec<u8>,
@@ -132,7 +160,7 @@ fn cmd_mine(
     threads: Option<usize>,
     difficulty_override: Option<u32>,
     no_submit: bool,
-    rpc_url: Option<String>,
+    rpc_config: &uhash::rpc::RpcConfig,
 ) -> anyhow::Result<()> {
     let wallet_path = default_wallet_path();
 
@@ -146,16 +174,7 @@ fn cmd_mine(
     let address = wallet.address_str();
 
     // Create RPC client
-    let client = if let Some(ref url) = rpc_url {
-        let config = uhash::rpc::RpcConfig {
-            rpc_url: url.clone(),
-            lcd_url: url.replace("rpc", "lcd"),
-            ..Default::default()
-        };
-        RpcClient::with_config(config)
-    } else {
-        RpcClient::new()
-    };
+    let client = RpcClient::with_config(rpc_config.clone());
 
     let rt = tokio::runtime::Runtime::new()?;
 
@@ -190,7 +209,7 @@ fn cmd_mine(
     let num_threads = threads.unwrap_or_else(num_cpus::get);
 
     println!("\n=== UniversalHash Miner ===");
-    println!("Contract: {}", CONTRACT_ADDRESS);
+    println!("Contract: {}", rpc_config.contract_address);
     println!("Address:  {}", address);
     println!("Difficulty: {} bits", difficulty);
     println!("Threads: {}", num_threads);
@@ -358,7 +377,7 @@ fn cmd_send(
     hash_hex: &str,
     nonce: u64,
     timestamp: u64,
-    rpc_url: Option<String>,
+    rpc_config: &uhash::rpc::RpcConfig,
 ) -> anyhow::Result<()> {
     let wallet_path = default_wallet_path();
 
@@ -369,23 +388,14 @@ fn cmd_send(
     let wallet = Wallet::load_from_file(&wallet_path)?;
 
     println!("Submitting proof to contract...");
-    println!("Contract: {}", CONTRACT_ADDRESS);
+    println!("Contract: {}", rpc_config.contract_address);
     println!("From: {}", wallet.address_str());
     println!("Hash: {}", hash_hex);
     println!("Nonce: {}", nonce);
     println!("Timestamp: {}", timestamp);
 
     // Create RPC client
-    let client = if let Some(url) = rpc_url {
-        let config = uhash::rpc::RpcConfig {
-            rpc_url: url.clone(),
-            lcd_url: url.replace("rpc", "lcd"),
-            ..Default::default()
-        };
-        RpcClient::with_config(config)
-    } else {
-        RpcClient::new()
-    };
+    let client = RpcClient::with_config(rpc_config.clone());
 
     // Build proof submission
     let proof = ProofSubmission {
