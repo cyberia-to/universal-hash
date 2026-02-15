@@ -2,6 +2,18 @@
 
 All notable changes to uhash-core will be documented in this file.
 
+## [0.2.7] - 2026-02-15
+
+### Added
+
+- **Auto-activation**: CLI miner auto-activates new wallets via `bostrom.cybernode.ai/activate` on first `mine` — no manual BOOT transfer needed
+- **Local sequence tracking**: Prevents TX code-32 (sequence mismatch) errors when submitting proofs faster than blocks confirm
+- **Account existence check**: `RpcClient::account_exists()` queries LCD before mining to detect unactivated accounts
+
+### Fixed
+
+- **Rapid proof submission**: Sequence numbers now tracked locally and incremented after each broadcast, eliminating every-other-proof failures
+
 ## [0.2.6] - 2026-02-15
 
 ### Added
