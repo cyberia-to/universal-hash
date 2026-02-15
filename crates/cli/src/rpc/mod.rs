@@ -283,7 +283,7 @@ impl RpcClient {
                 denom,
                 amount: self.config.fee_amount,
             },
-            600000u64,
+            1600000u64,
         );
 
         let signer_info = SignerInfo::single_direct(Some(signing_key.public_key()), sequence);
