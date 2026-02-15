@@ -80,6 +80,8 @@ pub enum ExecuteMsg {
         hash: String,
         nonce: u64,
         timestamp: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        miner_address: Option<String>,
     },
 }
 
@@ -239,11 +241,12 @@ impl RpcClient {
             (acc, seq)
         };
 
-        // Build execute message
+        // Build execute message (miner_address=None: sender is the miner)
         let execute_msg = ExecuteMsg::SubmitProof {
             hash: proof.hash.clone(),
             nonce: proof.nonce,
             timestamp: proof.timestamp,
+            miner_address: None,
         };
         let msg_bytes = serde_json::to_vec(&execute_msg)?;
 
@@ -386,20 +389,32 @@ impl RpcClient {
         json.get("account").is_some()
     }
 
-    /// Activate a new account via the activation service (sends 1 boot)
-    pub async fn activate_account(&self, address: &str) -> Result<()> {
-        let url = format!(
-            "https://bostrom.cybernode.ai/activate?address={}",
-            address
-        );
+    /// Relay a proof via the relay service (submits on behalf of the miner).
+    /// Used for new accounts that don't exist on-chain yet.
+    /// Returns the transaction hash on success.
+    pub async fn relay_proof(&self, proof: &ProofSubmission) -> Result<String> {
+        let url = "https://bostrom.cybernode.ai/relay";
+        let body = serde_json::json!({
+            "hash": proof.hash,
+            "nonce": proof.nonce,
+            "timestamp": proof.timestamp,
+            "miner_address": proof.miner_address,
+        });
 
-        let resp: serde_json::Value = self.http_client.get(&url).send().await?.json().await?;
+        let resp: serde_json::Value = self
+            .http_client
+            .post(url)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
 
         if resp["ok"].as_bool() == Some(true) {
-            Ok(())
+            Ok(resp["tx_hash"].as_str().unwrap_or("").to_string())
         } else {
             let error = resp["error"].as_str().unwrap_or("unknown error");
-            anyhow::bail!("Account activation failed: {}", error)
+            anyhow::bail!("Relay failed: {}", error)
         }
     }
 

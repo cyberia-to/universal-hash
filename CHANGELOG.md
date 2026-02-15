@@ -2,6 +2,17 @@
 
 All notable changes to uhash-core will be documented in this file.
 
+## [0.2.8] - 2026-02-16
+
+### Changed
+
+- **Proof relay for new miners**: New miners' first proof is relayed via relay service instead of requiring account activation — no tokens needed to start mining
+- **Account check moved**: Account existence check now happens after a proof is found (not before mining starts), so miners can hash immediately while the relay handles submission
+
+### Removed
+
+- **`activate_account()`**: Replaced by `relay_proof()` in CLI — activation endpoint no longer needed
+
 ## [0.2.7] - 2026-02-15
 
 ### Added

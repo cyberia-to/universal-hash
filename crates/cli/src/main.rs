@@ -276,35 +276,6 @@ fn cmd_mine(
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    // Check if account exists on-chain; activate if needed
-    if !no_submit {
-        if !json {
-            print!("Checking account status...");
-        }
-        if !rt.block_on(client.account_exists(&address)) {
-            if !json {
-                println!(" not found on chain, activating...");
-            }
-            match rt.block_on(client.activate_account(&address)) {
-                Ok(_) => {
-                    if !json {
-                        println!("Account activated! Waiting for confirmation...");
-                    }
-                    std::thread::sleep(std::time::Duration::from_secs(7));
-                }
-                Err(e) => {
-                    anyhow::bail!(
-                        "Account activation failed: {}. Send 1 boot to {} to activate it manually.",
-                        e,
-                        address
-                    );
-                }
-            }
-        } else if !json {
-            println!(" OK");
-        }
-    }
-
     // Fetch difficulty from contract (unless overridden)
     let difficulty = if let Some(d) = difficulty_override {
         if !json {
@@ -511,9 +482,6 @@ fn cmd_mine(
             }
 
             // Auto-submit
-            if !json {
-                println!("\nSubmitting proof to contract...");
-            }
             let submission = ProofSubmission {
                 hash: hex::encode(&proof.hash),
                 nonce: proof.nonce,
@@ -521,33 +489,78 @@ fn cmd_mine(
                 miner_address: address.clone(),
             };
 
-            match rt.block_on(client.submit_proof(submission, &signing_key)) {
-                Ok(result) => {
-                    proofs_submitted += 1;
-                    if json {
-                        let event = JsonProofSubmitted {
-                            event: "proof_submitted",
-                            tx_hash: result.tx_hash,
-                            success: true,
-                            proofs_submitted,
-                        };
-                        println!("{}", serde_json::to_string(&event)?);
-                    } else {
-                        println!("Proof accepted! TX: {}", result.tx_hash);
-                        println!("View: https://cyb.ai/network/bostrom/tx/{}", result.tx_hash);
+            // Check if account exists; if not, relay the proof instead of direct submit
+            let is_new_account = !rt.block_on(client.account_exists(&address));
+            if is_new_account {
+                if !json {
+                    println!("\nNew account — relaying first proof via relay service...");
+                }
+                match rt.block_on(client.relay_proof(&submission)) {
+                    Ok(tx_hash) => {
+                        proofs_submitted += 1;
+                        if json {
+                            let event = JsonProofSubmitted {
+                                event: "proof_submitted",
+                                tx_hash: tx_hash.clone(),
+                                success: true,
+                                proofs_submitted,
+                            };
+                            println!("{}", serde_json::to_string(&event)?);
+                        } else {
+                            println!("Proof relayed! TX: {}", tx_hash);
+                            println!("View: https://cyb.ai/network/bostrom/tx/{}", tx_hash);
+                            println!("Waiting for account creation...");
+                        }
+                        // Wait for the relay TX to be included so account exists for next proof
+                        std::thread::sleep(Duration::from_secs(7));
+                    }
+                    Err(e) => {
+                        if json {
+                            let event = JsonProofSubmitted {
+                                event: "proof_submitted",
+                                tx_hash: String::new(),
+                                success: false,
+                                proofs_submitted,
+                            };
+                            println!("{}", serde_json::to_string(&event)?);
+                        } else {
+                            eprintln!("Relay failed: {}. Continuing to mine...", e);
+                        }
                     }
                 }
-                Err(e) => {
-                    if json {
-                        let event = JsonProofSubmitted {
-                            event: "proof_submitted",
-                            tx_hash: String::new(),
-                            success: false,
-                            proofs_submitted,
-                        };
-                        println!("{}", serde_json::to_string(&event)?);
-                    } else {
-                        eprintln!("Submit failed: {}. Continuing to mine...", e);
+            } else {
+                // Normal direct submit
+                if !json {
+                    println!("\nSubmitting proof to contract...");
+                }
+                match rt.block_on(client.submit_proof(submission, &signing_key)) {
+                    Ok(result) => {
+                        proofs_submitted += 1;
+                        if json {
+                            let event = JsonProofSubmitted {
+                                event: "proof_submitted",
+                                tx_hash: result.tx_hash,
+                                success: true,
+                                proofs_submitted,
+                            };
+                            println!("{}", serde_json::to_string(&event)?);
+                        } else {
+                            println!("Proof accepted! TX: {}", result.tx_hash);
+                            println!("View: https://cyb.ai/network/bostrom/tx/{}", result.tx_hash);
+                        }
+                    }
+                    Err(e) => {
+                        if json {
+                            let event = JsonProofSubmitted {
+                                event: "proof_submitted",
+                                tx_hash: String::new(),
+                                success: false,
+                                proofs_submitted,
+                            };
+                            println!("{}", serde_json::to_string(&event)?);
+                        } else {
+                            eprintln!("Submit failed: {}. Continuing to mine...", e);
+                        }
                     }
                 }
             }
