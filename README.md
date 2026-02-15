@@ -1,8 +1,8 @@
-# uhash-prover
+# UniversalHash
 
 CLI miner for **LI (Lithium)** tokens on the [Bostrom](https://cyb.ai) blockchain using UniversalHash proof-of-work.
 
-Mines democratic proof-of-work where phones compete with servers (1:3 ratio instead of 1:100+).
+Democratic proof-of-work where phones compete with servers (1:3 ratio instead of 1:100+). Zero fees required.
 
 ## Contract
 
@@ -12,7 +12,6 @@ Mines democratic proof-of-work where phones compete with servers (1:3 ratio inst
 | **Contract** | `bostrom1qwys5wj3r4lry7dl74ukn5unhdpa6t397h097q36dqvrp5qgvjxqverdlf` |
 | **LI Token** | `factory/bostrom1qwys5wj3r4lry7dl74ukn5unhdpa6t397h097q36dqvrp5qgvjxqverdlf/li` |
 | **Code ID** | 45 |
-| **Difficulty** | 16 bits |
 | **Reward** | 1,000,000 LI per valid proof |
 
 ## Installation
@@ -20,14 +19,21 @@ Mines democratic proof-of-work where phones compete with servers (1:3 ratio inst
 ### From Source
 
 ```bash
-cargo install --path .
+cargo build -p uhash-prover --release
+# Binary: target/release/uhash
 ```
 
-Requires Rust 1.70+. The binary will be installed as `uhash`.
+Requires Rust 1.78+.
 
 ### Pre-built Binaries
 
 Download from [Releases](https://github.com/cyberia-to/universal-hash/releases).
+
+### WASM (npm)
+
+```bash
+npm install uhash-web
+```
 
 ## Quick Start
 
@@ -35,14 +41,13 @@ Download from [Releases](https://github.com/cyberia-to/universal-hash/releases).
 # 1. Create a new wallet
 uhash new-wallet
 
-# 2. Fund your wallet with BOOT tokens (for gas fees)
-#    Send some BOOT to the address shown above
-
-# 3. Start mining (auto-submits proofs)
+# 2. Start mining (auto-submits proofs, zero fees)
 uhash mine
 
-# 4. Check your LI balance on https://cyb.ai
+# 3. Check your LI balance on https://cyb.ai
 ```
+
+No BOOT tokens needed — Bostrom supports zero-fee transactions.
 
 ## Commands
 
@@ -50,6 +55,7 @@ uhash mine
 |---------|-------------|
 | `mine` | Start mining LI tokens (auto-submits proofs) |
 | `send` | Submit a specific proof to the chain |
+| `status` | Query contract state (seed, difficulty, config) |
 | `new-wallet` | Generate a new wallet |
 | `import-mnemonic` | Import wallet from 12/24 word mnemonic |
 | `export-mnemonic` | Export wallet mnemonic (backup) |
@@ -78,6 +84,16 @@ The miner will:
 3. When a valid proof is found, automatically sign and submit the transaction
 4. Print the TX hash with a link to the explorer
 5. Continue mining for the next proof
+
+### Contract Status
+
+```bash
+uhash status
+# or with JSON output:
+uhash --json status
+```
+
+Returns seed, difficulty, min profitable difficulty, base reward, and period duration.
 
 ### Manual Proof Submission
 
@@ -111,15 +127,41 @@ uhash benchmark
 uhash benchmark --count 1000
 ```
 
-## Global Options
+## JSON Output (Agent Integration)
+
+All commands support the `--json` flag for machine-readable output, enabling integration with AI agents (Claude Code, OpenClaw, LangChain, etc.):
 
 ```bash
-# Custom RPC endpoint
-uhash --rpc https://rpc.bostrom.cybernode.ai:443 mine
+# Structured benchmark output
+uhash --json benchmark -c 100
+# {"total_hashes":100,"elapsed_s":0.07,"hashrate":1420.0,"params":{"chains":4,"scratchpad_kb":512,"total_mb":2,"rounds":12288}}
 
-# Custom wallet file
-uhash --wallet /path/to/wallet.json mine
+# Contract status
+uhash --json status
+# {"contract":"bostrom1...","seed":"8aff...","difficulty":8,"min_profitable_difficulty":8,"base_reward":"1000000","period_duration":600}
+
+# Mining emits NDJSON events
+uhash --json mine
+# {"event":"mine_started","contract":"bostrom1...","address":"bostrom1...","difficulty":8,"threads":8,"seed":"...","auto_submit":true}
+# {"event":"proof_found","hash":"0000...","nonce":1234,"timestamp":1707912345,"hashes_computed":50000,"hashrate":1420.0}
+# {"event":"proof_submitted","tx_hash":"A1B2C3...","success":true,"proofs_submitted":1}
+
+# Errors return structured JSON with exit code 1
+uhash --json mine
+# {"error":"No wallet found. Create one with 'uhash new-wallet' or 'uhash import-mnemonic'"}
 ```
+
+See [`SKILL.md`](SKILL.md) for a complete agent skill definition compatible with Claude Code and OpenClaw.
+
+## Global Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--json` | Machine-readable JSON output | off |
+| `--rpc <URL>` | Custom RPC endpoint | `https://rpc.bostrom.cybernode.ai` |
+| `--contract <ADDR>` | Custom contract address | production contract |
+| `--fee <UBOOT>` | Transaction fee in uboot | `0` (zero-fee) |
+| `--wallet <PATH>` | Custom wallet file | `~/.uhash/wallet.txt` |
 
 ## Configuration
 
@@ -127,10 +169,10 @@ uhash --wallet /path/to/wallet.json mine
 |---------|---------|
 | RPC | `https://rpc.bostrom.cybernode.ai` |
 | LCD | `https://lcd.bostrom.cybernode.ai` |
-| Wallet | `~/.uhash/wallet.json` |
+| Wallet | `~/.uhash/wallet.txt` |
 | Threads | All CPU cores |
-| Gas | 20,000,000 |
-| Fee | 250,000 boot |
+| Gas | 600,000 |
+| Fee | 0 boot (zero-fee) |
 
 ## Performance
 
@@ -142,16 +184,14 @@ uhash --wallet /path/to/wallet.json mine
 
 Phone-to-desktop ratio: **1.6:1 to 3.5:1** (target 1:3-5 achieved).
 
-At difficulty 16, a single Mac finds a valid proof roughly every 30-40 seconds.
-
 ## Algorithm
 
-Uses [uhash-core](https://github.com/cyberia-to/uhash-core) (v0.2.3) - a memory-hard proof-of-work algorithm designed for mobile fairness:
+UniversalHash v4 — a memory-hard proof-of-work algorithm designed for mobile fairness:
 
-- **2 MB memory** (4 x 512 KB scratchpads) - fits in L2 cache
-- **4 parallel chains** - matches phone core count
+- **2 MB memory** (4 x 512 KB scratchpads) — fits in L2 cache
+- **4 parallel chains** — matches phone core count
 - **Triple primitive rotation**: AES + SHA256 + BLAKE3 compression functions
-- **Hardware crypto acceleration** on ARM (AES-NI, SHA extensions) and x86
+- **Hardware crypto acceleration** on ARM (AES, SHA2 extensions) and x86 (AES-NI)
 - **ASIC-resistant**: Memory-bound with sequential dependencies
 
 ### Self-Authenticating Proofs
@@ -165,22 +205,22 @@ The miner's address is embedded in the hash input, so changing the address inval
 ## Architecture
 
 ```
-uhash-prover (this repo)
-├── CLI binary (mine, send, wallet commands)
-├── RPC client (LCD queries, tx broadcast)
-└── Wallet (bip39 mnemonic, secp256k1 signing)
+universal-hash/
+├── crates/
+│   ├── cli/          uhash-prover — mining CLI binary
+│   ├── core/         uhash-core — algorithm library (no_std)
+│   ├── web/          uhash-web — WASM bindings (npm: uhash-web)
+│   └── demo/         uhash-demo — Tauri v2 benchmark app
+├── SKILL.md          Agent skill for AI integration
+├── Makefile          Cross-platform build system
+└── .github/          CI/CD workflows
 
-uhash-core (shared algorithm)
-├── UniversalHash v4 implementation
-├── Platform-specific intrinsics (ARM, x86, WASM)
-└── no_std compatible (runs in CosmWasm)
-
-cw-universal-hash (on-chain verifier)
+cw-universal-hash (separate repo: cw-cyber)
 ├── Proof verification
 ├── LI token minting via TokenFactory
-└── Seed rotation & difficulty config
+└── Seed rotation & difficulty adjustment
 ```
 
 ## License
 
-Unlicense - Public Domain
+Unlicense — Public Domain

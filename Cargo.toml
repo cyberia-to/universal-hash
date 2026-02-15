@@ -3,6 +3,12 @@ members = ["crates/cli", "crates/core", "crates/web", "crates/demo/src-tauri"]
 default-members = ["crates/cli", "crates/core", "crates/web"]
 resolver = "2"
 
+[workspace.package]
+version = "0.2.6"
+authors = ["Cyberia"]
+license = "Unlicense"
+repository = "https://github.com/cyberia-to/universal-hash"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

@@ -1,11 +1,11 @@
 [package]
 name = "uhash-core"
-version = "0.2.3"
+version.workspace = true
 edition = "2024"
-authors = ["Cyberia"]
+authors.workspace = true
 description = "UniversalHash v4 - democratic proof-of-work algorithm where phones compete with servers"
-repository = "https://github.com/cyberia-to/universal-hash"
-license = "Unlicense"
+repository.workspace = true
+license.workspace = true
 keywords = ["crypto", "hash", "pow", "blockchain", "cosmos"]
 categories = ["cryptography", "no-std"]
 

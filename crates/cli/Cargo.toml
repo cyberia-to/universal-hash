@@ -1,11 +1,11 @@
 [package]
 name = "uhash-prover"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
-authors = ["Cyberia"]
+authors.workspace = true
 description = "UniversalHash proof-of-work miner for Bostrom blockchain"
-repository = "https://github.com/cyberia-to/universal-hash"
-license = "Unlicense"
+repository.workspace = true
+license.workspace = true
 
 [lib]
 name = "uhash"

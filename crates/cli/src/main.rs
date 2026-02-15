@@ -9,8 +9,10 @@
 //! - `import-mnemonic` - Import a wallet from mnemonic phrase
 //! - `export-mnemonic` - Export the wallet mnemonic
 //! - `benchmark` - Run performance benchmark
+//! - `status` - Query contract state (seed, difficulty, config)
 
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -20,10 +22,89 @@ use uhash::rpc::{ProofSubmission, RpcClient};
 use uhash::wallet::{default_wallet_path, ensure_wallet_dir, Wallet};
 use uhash::{meets_difficulty, UniversalHash};
 
+// ── JSON output structs ──
+
+#[derive(Serialize)]
+struct JsonProofFound {
+    event: &'static str,
+    hash: String,
+    nonce: u64,
+    timestamp: u64,
+    hashes_computed: u64,
+    hashrate: f64,
+}
+
+#[derive(Serialize)]
+struct JsonProofSubmitted {
+    event: &'static str,
+    tx_hash: String,
+    success: bool,
+    proofs_submitted: u64,
+}
+
+#[derive(Serialize)]
+struct JsonMineStarted {
+    event: &'static str,
+    contract: String,
+    address: String,
+    difficulty: u32,
+    threads: usize,
+    seed: String,
+    auto_submit: bool,
+}
+
+#[derive(Serialize)]
+struct JsonSendResult {
+    tx_hash: String,
+    success: bool,
+}
+
+#[derive(Serialize)]
+struct JsonBenchmark {
+    total_hashes: u32,
+    elapsed_s: f64,
+    hashrate: f64,
+    params: JsonAlgoParams,
+}
+
+#[derive(Serialize)]
+struct JsonAlgoParams {
+    chains: usize,
+    scratchpad_kb: usize,
+    total_mb: usize,
+    rounds: usize,
+}
+
+#[derive(Serialize)]
+struct JsonWallet {
+    address: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+}
+
+#[derive(Serialize)]
+struct JsonStatus {
+    contract: String,
+    seed: String,
+    difficulty: u32,
+    min_profitable_difficulty: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_reward: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    period_duration: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paused: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct JsonError {
+    error: String,
+}
+
 #[derive(Parser)]
 #[command(name = "uhash")]
 #[command(author = "Cyberia")]
-#[command(version = "0.1.0")]
+#[command(version)]
 #[command(about = "UniversalHash proof-of-work miner for Bostrom blockchain")]
 struct Cli {
     #[command(subcommand)]
@@ -44,6 +125,10 @@ struct Cli {
     /// Custom wallet file path
     #[arg(long, global = true)]
     wallet: Option<PathBuf>,
+
+    /// Output in JSON format (machine-readable, for agent/script integration)
+    #[arg(long, global = true)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -100,11 +185,15 @@ enum Commands {
         #[arg(short, long, default_value = "100")]
         count: u32,
     },
+
+    /// Query contract status (seed, difficulty, config)
+    Status,
 }
 
 fn main() {
     let cli = Cli::parse();
 
+    let json = cli.json;
     let rpc_config = build_rpc_config(cli.rpc.as_deref(), cli.contract.as_deref(), cli.fee);
 
     let result = match cli.command {
@@ -112,21 +201,29 @@ fn main() {
             threads,
             difficulty,
             no_submit,
-        } => cmd_mine(threads, difficulty, no_submit, &rpc_config),
+        } => cmd_mine(threads, difficulty, no_submit, &rpc_config, json),
         Commands::Send {
             hash,
             nonce,
             timestamp,
-        } => cmd_send(&hash, nonce, timestamp, &rpc_config),
-        Commands::ImportMnemonic { phrase } => cmd_import_mnemonic(phrase, cli.wallet),
-        Commands::ExportMnemonic => cmd_export_mnemonic(cli.wallet),
-        Commands::NewWallet => cmd_new_wallet(cli.wallet),
-        Commands::Address => cmd_address(cli.wallet),
-        Commands::Benchmark { count } => cmd_benchmark(count),
+        } => cmd_send(&hash, nonce, timestamp, &rpc_config, json),
+        Commands::ImportMnemonic { phrase } => cmd_import_mnemonic(phrase, cli.wallet, json),
+        Commands::ExportMnemonic => cmd_export_mnemonic(cli.wallet, json),
+        Commands::NewWallet => cmd_new_wallet(cli.wallet, json),
+        Commands::Address => cmd_address(cli.wallet, json),
+        Commands::Benchmark { count } => cmd_benchmark(count, json),
+        Commands::Status => cmd_status(&rpc_config, json),
     };
 
     if let Err(e) = result {
-        eprintln!("Error: {}", e);
+        if json {
+            let err = JsonError {
+                error: e.to_string(),
+            };
+            println!("{}", serde_json::to_string(&err).unwrap());
+        } else {
+            eprintln!("Error: {}", e);
+        }
         std::process::exit(1);
     }
 }
@@ -161,6 +258,7 @@ fn cmd_mine(
     difficulty_override: Option<u32>,
     no_submit: bool,
     rpc_config: &uhash::rpc::RpcConfig,
+    json: bool,
 ) -> anyhow::Result<()> {
     let wallet_path = default_wallet_path();
 
@@ -180,42 +278,67 @@ fn cmd_mine(
 
     // Fetch difficulty from contract (unless overridden)
     let difficulty = if let Some(d) = difficulty_override {
-        println!("Using difficulty override: {} bits", d);
+        if !json {
+            println!("Using difficulty override: {} bits", d);
+        }
         d
     } else {
-        println!("Fetching difficulty from contract...");
+        if !json {
+            println!("Fetching difficulty from contract...");
+        }
         match rt.block_on(client.get_difficulty()) {
             Ok(d) => {
-                println!("Contract difficulty: {} bits", d);
+                if !json {
+                    println!("Contract difficulty: {} bits", d);
+                }
                 d
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: Could not fetch difficulty ({}), using default 16",
-                    e
-                );
+                if !json {
+                    eprintln!(
+                        "Warning: Could not fetch difficulty ({}), using default 16",
+                        e
+                    );
+                }
                 16
             }
         }
     };
 
     // Query mining seed from contract
-    println!("Fetching seed from contract...");
+    if !json {
+        println!("Fetching seed from contract...");
+    }
     let epoch_seed = rt.block_on(client.get_seed()).unwrap_or_else(|e| {
-        eprintln!("Warning: Could not fetch seed ({}), using zeros", e);
+        if !json {
+            eprintln!("Warning: Could not fetch seed ({}), using zeros", e);
+        }
         [0u8; 32]
     });
 
     let num_threads = threads.unwrap_or_else(num_cpus::get);
 
-    println!("\n=== UniversalHash Miner ===");
-    println!("Contract: {}", rpc_config.contract_address);
-    println!("Address:  {}", address);
-    println!("Difficulty: {} bits", difficulty);
-    println!("Threads: {}", num_threads);
-    println!("Seed: {}", hex::encode(epoch_seed));
-    println!("Auto-submit: {}", if no_submit { "off" } else { "on" });
-    println!("===========================\n");
+    if json {
+        let started = JsonMineStarted {
+            event: "mine_started",
+            contract: rpc_config.contract_address.clone(),
+            address: address.clone(),
+            difficulty,
+            threads: num_threads,
+            seed: hex::encode(epoch_seed),
+            auto_submit: !no_submit,
+        };
+        println!("{}", serde_json::to_string(&started)?);
+    } else {
+        println!("\n=== UniversalHash Miner ===");
+        println!("Contract: {}", rpc_config.contract_address);
+        println!("Address:  {}", address);
+        println!("Difficulty: {} bits", difficulty);
+        println!("Threads: {}", num_threads);
+        println!("Seed: {}", hex::encode(epoch_seed));
+        println!("Auto-submit: {}", if no_submit { "off" } else { "on" });
+        println!("===========================\n");
+    }
 
     // Shared state for threads
     let total_hashes = Arc::new(AtomicU64::new(0));
@@ -286,27 +409,29 @@ fn cmd_mine(
         }
 
         // Monitor progress while threads work
-        loop {
-            std::thread::sleep(Duration::from_secs(2));
+        if !json {
+            loop {
+                std::thread::sleep(Duration::from_secs(2));
 
-            let hashes = total_hashes.load(Ordering::Relaxed);
-            let elapsed = start.elapsed().as_secs_f64();
-            let hashrate = if elapsed > 0.0 {
-                hashes as f64 / elapsed
-            } else {
-                0.0
-            };
+                let hashes = total_hashes.load(Ordering::Relaxed);
+                let elapsed = start.elapsed().as_secs_f64();
+                let hashrate = if elapsed > 0.0 {
+                    hashes as f64 / elapsed
+                } else {
+                    0.0
+                };
 
-            if stop.load(Ordering::Relaxed) {
-                break;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                print!(
+                    "\rHashrate: {:.0} H/s | Hashes: {} | Time: {:.0}s | Proofs sent: {}",
+                    hashrate, hashes, elapsed, proofs_submitted
+                );
+                use std::io::Write;
+                std::io::stdout().flush().ok();
             }
-
-            print!(
-                "\rHashrate: {:.0} H/s | Hashes: {} | Time: {:.0}s | Proofs sent: {}",
-                hashrate, hashes, elapsed, proofs_submitted
-            );
-            use std::io::Write;
-            std::io::stdout().flush().ok();
         }
 
         // Wait for all threads to finish
@@ -320,30 +445,46 @@ fn cmd_mine(
             let hashes = total_hashes.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
 
-            println!("\n\nFound valid proof!");
-            println!("  Hash:      {}", hex::encode(&proof.hash));
-            println!("  Nonce:     {}", proof.nonce);
-            println!("  Timestamp: {}", proof.timestamp);
-            println!(
-                "  Hashes:    {} ({:.0} H/s)",
-                hashes,
-                hashes as f64 / elapsed
-            );
+            if json {
+                let event = JsonProofFound {
+                    event: "proof_found",
+                    hash: hex::encode(&proof.hash),
+                    nonce: proof.nonce,
+                    timestamp: proof.timestamp,
+                    hashes_computed: hashes,
+                    hashrate: hashes as f64 / elapsed,
+                };
+                println!("{}", serde_json::to_string(&event)?);
+            } else {
+                println!("\n\nFound valid proof!");
+                println!("  Hash:      {}", hex::encode(&proof.hash));
+                println!("  Nonce:     {}", proof.nonce);
+                println!("  Timestamp: {}", proof.timestamp);
+                println!(
+                    "  Hashes:    {} ({:.0} H/s)",
+                    hashes,
+                    hashes as f64 / elapsed
+                );
+            }
 
             if no_submit {
-                println!("\nTo submit this proof, run:");
-                println!(
-                    "  uhash send --hash {} --nonce {} --timestamp {}",
-                    hex::encode(&proof.hash),
-                    proof.nonce,
-                    proof.timestamp
-                );
+                if !json {
+                    println!("\nTo submit this proof, run:");
+                    println!(
+                        "  uhash send --hash {} --nonce {} --timestamp {}",
+                        hex::encode(&proof.hash),
+                        proof.nonce,
+                        proof.timestamp
+                    );
+                }
                 // In no-submit mode, exit after first proof
                 break;
             }
 
             // Auto-submit
-            println!("\nSubmitting proof to contract...");
+            if !json {
+                println!("\nSubmitting proof to contract...");
+            }
             let submission = ProofSubmission {
                 hash: hex::encode(&proof.hash),
                 nonce: proof.nonce,
@@ -354,15 +495,40 @@ fn cmd_mine(
             match rt.block_on(client.submit_proof(submission, &signing_key)) {
                 Ok(result) => {
                     proofs_submitted += 1;
-                    println!("Proof accepted! TX: {}", result.tx_hash);
-                    println!("View: https://cyb.ai/network/bostrom/tx/{}", result.tx_hash);
+                    if json {
+                        let event = JsonProofSubmitted {
+                            event: "proof_submitted",
+                            tx_hash: result.tx_hash,
+                            success: true,
+                            proofs_submitted,
+                        };
+                        println!("{}", serde_json::to_string(&event)?);
+                    } else {
+                        println!("Proof accepted! TX: {}", result.tx_hash);
+                        println!(
+                            "View: https://cyb.ai/network/bostrom/tx/{}",
+                            result.tx_hash
+                        );
+                    }
                 }
                 Err(e) => {
-                    eprintln!("Submit failed: {}. Continuing to mine...", e);
+                    if json {
+                        let event = JsonProofSubmitted {
+                            event: "proof_submitted",
+                            tx_hash: String::new(),
+                            success: false,
+                            proofs_submitted,
+                        };
+                        println!("{}", serde_json::to_string(&event)?);
+                    } else {
+                        eprintln!("Submit failed: {}. Continuing to mine...", e);
+                    }
                 }
             }
 
-            println!("\nContinuing to mine...\n");
+            if !json {
+                println!("\nContinuing to mine...\n");
+            }
             // Loop continues — mine next proof
         } else {
             // Interrupted without finding proof
@@ -378,6 +544,7 @@ fn cmd_send(
     nonce: u64,
     timestamp: u64,
     rpc_config: &uhash::rpc::RpcConfig,
+    json: bool,
 ) -> anyhow::Result<()> {
     let wallet_path = default_wallet_path();
 
@@ -387,12 +554,14 @@ fn cmd_send(
 
     let wallet = Wallet::load_from_file(&wallet_path)?;
 
-    println!("Submitting proof to contract...");
-    println!("Contract: {}", rpc_config.contract_address);
-    println!("From: {}", wallet.address_str());
-    println!("Hash: {}", hash_hex);
-    println!("Nonce: {}", nonce);
-    println!("Timestamp: {}", timestamp);
+    if !json {
+        println!("Submitting proof to contract...");
+        println!("Contract: {}", rpc_config.contract_address);
+        println!("From: {}", wallet.address_str());
+        println!("Hash: {}", hash_hex);
+        println!("Nonce: {}", nonce);
+        println!("Timestamp: {}", timestamp);
+    }
 
     // Create RPC client
     let client = RpcClient::with_config(rpc_config.clone());
@@ -414,20 +583,35 @@ fn cmd_send(
     let rt = tokio::runtime::Runtime::new()?;
     let result = rt.block_on(client.submit_proof(proof, &signing_key))?;
 
-    println!("\nProof submitted successfully!");
-    println!("Transaction hash: {}", result.tx_hash);
-    println!(
-        "\nView on explorer: https://cyb.ai/network/bostrom/tx/{}",
-        result.tx_hash
-    );
+    if json {
+        let out = JsonSendResult {
+            tx_hash: result.tx_hash,
+            success: true,
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("\nProof submitted successfully!");
+        println!("Transaction hash: {}", result.tx_hash);
+        println!(
+            "\nView on explorer: https://cyb.ai/network/bostrom/tx/{}",
+            result.tx_hash
+        );
+    }
 
     Ok(())
 }
 
-fn cmd_import_mnemonic(phrase: Option<String>, wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
+fn cmd_import_mnemonic(
+    phrase: Option<String>,
+    wallet_path: Option<PathBuf>,
+    json: bool,
+) -> anyhow::Result<()> {
     let phrase = match phrase {
         Some(p) => p,
         None => {
+            if json {
+                anyhow::bail!("--phrase is required when using --json");
+            }
             println!("Enter your 24-word mnemonic phrase:");
             let mut input = String::new();
             std::io::stdin().read_line(&mut input)?;
@@ -441,14 +625,22 @@ fn cmd_import_mnemonic(phrase: Option<String>, wallet_path: Option<PathBuf>) -> 
 
     wallet.save_to_file(&path)?;
 
-    println!("Wallet imported successfully!");
-    println!("Address: {}", wallet.address_str());
-    println!("Saved to: {}", path.display());
+    if json {
+        let out = JsonWallet {
+            address: wallet.address_str(),
+            path: Some(path.display().to_string()),
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("Wallet imported successfully!");
+        println!("Address: {}", wallet.address_str());
+        println!("Saved to: {}", path.display());
+    }
 
     Ok(())
 }
 
-fn cmd_export_mnemonic(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
+fn cmd_export_mnemonic(wallet_path: Option<PathBuf>, json: bool) -> anyhow::Result<()> {
     let path = wallet_path.unwrap_or_else(default_wallet_path);
 
     if !path.exists() {
@@ -457,13 +649,26 @@ fn cmd_export_mnemonic(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
 
     let wallet = Wallet::load_from_file(&path)?;
 
-    println!("WARNING: Keep this mnemonic phrase secret and secure!");
-    println!("\n{}\n", wallet.mnemonic());
+    if json {
+        #[derive(Serialize)]
+        struct JsonMnemonic {
+            mnemonic: String,
+            address: String,
+        }
+        let out = JsonMnemonic {
+            mnemonic: wallet.mnemonic(),
+            address: wallet.address_str(),
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("WARNING: Keep this mnemonic phrase secret and secure!");
+        println!("\n{}\n", wallet.mnemonic());
+    }
 
     Ok(())
 }
 
-fn cmd_new_wallet(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
+fn cmd_new_wallet(wallet_path: Option<PathBuf>, json: bool) -> anyhow::Result<()> {
     let path = wallet_path
         .unwrap_or_else(|| ensure_wallet_dir().expect("Failed to create wallet directory"));
 
@@ -477,15 +682,23 @@ fn cmd_new_wallet(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
     let wallet = Wallet::new()?;
     wallet.save_to_file(&path)?;
 
-    println!("New wallet created!");
-    println!("Address: {}", wallet.address_str());
-    println!("Saved to: {}", path.display());
-    println!("\nIMPORTANT: Backup your mnemonic phrase with 'uhash export-mnemonic'");
+    if json {
+        let out = JsonWallet {
+            address: wallet.address_str(),
+            path: Some(path.display().to_string()),
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("New wallet created!");
+        println!("Address: {}", wallet.address_str());
+        println!("Saved to: {}", path.display());
+        println!("\nIMPORTANT: Backup your mnemonic phrase with 'uhash export-mnemonic'");
+    }
 
     Ok(())
 }
 
-fn cmd_address(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
+fn cmd_address(wallet_path: Option<PathBuf>, json: bool) -> anyhow::Result<()> {
     let path = wallet_path.unwrap_or_else(default_wallet_path);
 
     if !path.exists() {
@@ -493,13 +706,24 @@ fn cmd_address(wallet_path: Option<PathBuf>) -> anyhow::Result<()> {
     }
 
     let wallet = Wallet::load_from_file(&path)?;
-    println!("{}", wallet.address_str());
+
+    if json {
+        let out = JsonWallet {
+            address: wallet.address_str(),
+            path: None,
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("{}", wallet.address_str());
+    }
 
     Ok(())
 }
 
-fn cmd_benchmark(count: u32) -> anyhow::Result<()> {
-    println!("Running benchmark with {} hashes...", count);
+fn cmd_benchmark(count: u32, json: bool) -> anyhow::Result<()> {
+    if !json {
+        println!("Running benchmark with {} hashes...", count);
+    }
 
     let mut hasher = UniversalHash::new();
     let input = b"benchmark input data for UniversalHash v4";
@@ -515,23 +739,100 @@ fn cmd_benchmark(count: u32) -> anyhow::Result<()> {
     let elapsed = start.elapsed();
     let hashrate = count as f64 / elapsed.as_secs_f64();
 
-    println!("\nResults:");
-    println!("  Total hashes: {}", count);
-    println!("  Time elapsed: {:.2}s", elapsed.as_secs_f64());
-    println!("  Hashrate: {:.2} H/s", hashrate);
+    if json {
+        let out = JsonBenchmark {
+            total_hashes: count,
+            elapsed_s: elapsed.as_secs_f64(),
+            hashrate,
+            params: JsonAlgoParams {
+                chains: uhash_core::CHAINS,
+                scratchpad_kb: uhash_core::SCRATCHPAD_SIZE / 1024,
+                total_mb: uhash_core::TOTAL_MEMORY / (1024 * 1024),
+                rounds: uhash_core::ROUNDS,
+            },
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("\nResults:");
+        println!("  Total hashes: {}", count);
+        println!("  Time elapsed: {:.2}s", elapsed.as_secs_f64());
+        println!("  Hashrate: {:.2} H/s", hashrate);
 
-    // Memory info
-    println!("\nAlgorithm parameters:");
-    println!("  Chains: {}", uhash_core::CHAINS);
-    println!(
-        "  Memory per chain: {} KB",
-        uhash_core::SCRATCHPAD_SIZE / 1024
-    );
-    println!(
-        "  Total memory: {} MB",
-        uhash_core::TOTAL_MEMORY / (1024 * 1024)
-    );
-    println!("  Rounds: {}", uhash_core::ROUNDS);
+        println!("\nAlgorithm parameters:");
+        println!("  Chains: {}", uhash_core::CHAINS);
+        println!(
+            "  Memory per chain: {} KB",
+            uhash_core::SCRATCHPAD_SIZE / 1024
+        );
+        println!(
+            "  Total memory: {} MB",
+            uhash_core::TOTAL_MEMORY / (1024 * 1024)
+        );
+        println!("  Rounds: {}", uhash_core::ROUNDS);
+    }
+
+    Ok(())
+}
+
+fn cmd_status(rpc_config: &uhash::rpc::RpcConfig, json: bool) -> anyhow::Result<()> {
+    let client = RpcClient::with_config(rpc_config.clone());
+    let rt = tokio::runtime::Runtime::new()?;
+
+    if !json {
+        println!("Querying contract status...");
+        println!("Contract: {}", rpc_config.contract_address);
+    }
+
+    // Query seed
+    let seed = rt.block_on(client.get_seed())?;
+    let seed_hex = hex::encode(seed);
+
+    // Query difficulty
+    let difficulty = rt.block_on(client.get_difficulty())?;
+    let min_profitable = rt
+        .block_on(client.get_min_profitable_difficulty())
+        .unwrap_or(0);
+
+    // Try to query full config for extra fields
+    let config_resp: Option<uhash::rpc::ConfigResponse> = rt.block_on(async {
+        let query = uhash::rpc::QueryMsg::Config {};
+        let query_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            serde_json::to_vec(&query).ok()?,
+        );
+        let url = format!(
+            "{}/cosmwasm/wasm/v1/contract/{}/smart/{}",
+            rpc_config.lcd_url, rpc_config.contract_address, query_b64
+        );
+        let http = reqwest::Client::new();
+        let r = http.get(&url).send().await.ok()?;
+        let v: serde_json::Value = r.json().await.ok()?;
+        serde_json::from_value(v["data"].clone()).ok()
+    });
+
+    if json {
+        let out = JsonStatus {
+            contract: rpc_config.contract_address.clone(),
+            seed: seed_hex,
+            difficulty,
+            min_profitable_difficulty: min_profitable,
+            base_reward: config_resp.as_ref().map(|c| c.base_reward.clone()),
+            period_duration: config_resp.as_ref().map(|c| c.period_duration),
+            paused: config_resp.as_ref().map(|c| c.paused),
+        };
+        println!("{}", serde_json::to_string(&out)?);
+    } else {
+        println!("\n=== Contract Status ===");
+        println!("Seed:       {}", seed_hex);
+        println!("Difficulty: {} bits", difficulty);
+        println!("Min profitable: {} bits", min_profitable);
+        if let Some(ref config) = config_resp {
+            println!("Base reward:    {} uLI", config.base_reward);
+            println!("Period duration: {}s", config.period_duration);
+            println!("Paused: {}", config.paused);
+        }
+        println!("=======================");
+    }
 
     Ok(())
 }

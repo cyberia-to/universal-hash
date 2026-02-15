@@ -2,6 +2,26 @@
 
 All notable changes to uhash-core will be documented in this file.
 
+## [0.2.6] - 2026-02-15
+
+### Added
+
+- **`--json` flag**: Global flag for all CLI commands producing machine-readable JSON output
+  - `mine` emits NDJSON event stream: `mine_started`, `proof_found`, `proof_submitted`
+  - `benchmark` returns `{"total_hashes", "elapsed_s", "hashrate", "params"}`
+  - `send` returns `{"tx_hash", "success"}`
+  - `address` / `new-wallet` / `import-mnemonic` / `export-mnemonic` return structured JSON
+  - Errors output as `{"error": "..."}` with exit code 1
+- **`status` command**: Query contract state (seed, difficulty, min profitable difficulty, config) in one call
+- **Agent Skill (`SKILL.md`)**: Machine-readable skill file for AI agent integration (Claude Code, OpenClaw)
+  - Documents full CLI interface, wallet workflow, mining events, balance checking
+  - Enables autonomous mining by AI agents
+
+### Changed
+
+- Version numbers unified across workspace (all crates now 0.2.6)
+- npm package `uhash-web` bumped to 0.2.6
+
 ## [0.2.5] - 2026-02-15
 
 ### Added

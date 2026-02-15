@@ -47,6 +47,64 @@ export class Benchmark {
 if (Symbol.dispose) Benchmark.prototype[Symbol.dispose] = Benchmark.prototype.free;
 
 /**
+ * Mining struct for Web Worker usage.
+ * Reuses UniversalHash across batches to avoid 2MB re-allocation per hash.
+ */
+export class Miner {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        MinerFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_miner_free(ptr, 0);
+    }
+    /**
+     * Mine a batch of nonces. Returns JSON string:
+     * `{"found":true,"hash":"...","nonce":N,"count":M}` or `{"found":false,"count":M}`
+     *
+     * - `start_nonce`: first nonce to try (as f64, safe up to 2^53)
+     * - `nonce_step`: increment between nonces (for interleaved multi-worker mining)
+     * - `batch_size`: number of nonces to try in this batch
+     * @param {number} start_nonce
+     * @param {number} nonce_step
+     * @param {number} batch_size
+     * @returns {string}
+     */
+    mine_batch(start_nonce, nonce_step, batch_size) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.miner_mine_batch(this.__wbg_ptr, start_nonce, nonce_step, batch_size);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * @param {string} seed_hex
+     * @param {string} address
+     * @param {number} timestamp
+     * @param {number} difficulty
+     */
+    constructor(seed_hex, address, timestamp, difficulty) {
+        const ptr0 = passStringToWasm0(seed_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(address, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.miner_new(ptr0, len0, ptr1, len1, timestamp, difficulty);
+        this.__wbg_ptr = ret >>> 0;
+        MinerFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+}
+if (Symbol.dispose) Miner.prototype[Symbol.dispose] = Miner.prototype.free;
+
+/**
  * Single hash function for testing
  * @param {Uint8Array} input
  * @returns {Uint8Array}
@@ -131,6 +189,9 @@ function __wbg_get_imports() {
 const BenchmarkFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_benchmark_free(ptr >>> 0, 1));
+const MinerFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_miner_free(ptr >>> 0, 1));
 
 function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
@@ -176,6 +237,43 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 
+function passStringToWasm0(arg, malloc, realloc) {
+    if (realloc === undefined) {
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = malloc(buf.length, 1) >>> 0;
+        getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    }
+
+    let len = arg.length;
+    let ptr = malloc(len, 1) >>> 0;
+
+    const mem = getUint8ArrayMemory0();
+
+    let offset = 0;
+
+    for (; offset < len; offset++) {
+        const code = arg.charCodeAt(offset);
+        if (code > 0x7F) break;
+        mem[ptr + offset] = code;
+    }
+    if (offset !== len) {
+        if (offset !== 0) {
+            arg = arg.slice(offset);
+        }
+        ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+        const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+        const ret = cachedTextEncoder.encodeInto(arg, view);
+
+        offset += ret.written;
+        ptr = realloc(ptr, len, offset, 1) >>> 0;
+    }
+
+    WASM_VECTOR_LEN = offset;
+    return ptr;
+}
+
 let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
 cachedTextDecoder.decode();
 const MAX_SAFARI_DECODE_BYTES = 2146435072;
@@ -188,6 +286,19 @@ function decodeText(ptr, len) {
         numBytesDecoded = len;
     }
     return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+}
+
+const cachedTextEncoder = new TextEncoder();
+
+if (!('encodeInto' in cachedTextEncoder)) {
+    cachedTextEncoder.encodeInto = function (arg, view) {
+        const buf = cachedTextEncoder.encode(arg);
+        view.set(buf);
+        return {
+            read: arg.length,
+            written: buf.length
+        };
+    };
 }
 
 let WASM_VECTOR_LEN = 0;

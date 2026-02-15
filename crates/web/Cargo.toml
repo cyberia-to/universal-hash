@@ -1,10 +1,10 @@
 [package]
 name = "uhash-web"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "UniversalHash proof-of-work algorithm - WASM bindings for browser mining"
 license = "MIT"
-repository = "https://github.com/cyberia-to/universal-hash"
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

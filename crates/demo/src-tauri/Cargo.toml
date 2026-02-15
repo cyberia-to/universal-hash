@@ -1,10 +1,10 @@
 [package]
 name = "uhash-demo"
-version = "0.1.0"
+version.workspace = true
 description = "UHash Benchmark Demo App"
-authors = []
-license = "Unlicense"
-repository = "https://github.com/cyberia-to/universal-hash"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
