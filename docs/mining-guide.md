@@ -77,7 +77,7 @@ That's it. The miner will:
 3. Automatically submit valid proofs to the contract
 4. Mint LI tokens directly to your wallet address
 
-**No BOOT tokens required.** Bostrom supports zero-fee transactions, so you can mine with a brand-new empty wallet.
+**Almost no BOOT needed.** Bostrom supports zero-fee transactions, but new wallets need a one-time activation — send 1 boot to your address from any existing wallet to create the account on-chain. After that, all mining and proof submissions are completely free.
 
 ### Mining Output
 

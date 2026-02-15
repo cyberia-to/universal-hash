@@ -276,6 +276,35 @@ fn cmd_mine(
 
     let rt = tokio::runtime::Runtime::new()?;
 
+    // Check if account exists on-chain; activate if needed
+    if !no_submit {
+        if !json {
+            print!("Checking account status...");
+        }
+        if !rt.block_on(client.account_exists(&address)) {
+            if !json {
+                println!(" not found on chain, activating...");
+            }
+            match rt.block_on(client.activate_account(&address)) {
+                Ok(_) => {
+                    if !json {
+                        println!("Account activated! Waiting for confirmation...");
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(7));
+                }
+                Err(e) => {
+                    anyhow::bail!(
+                        "Account activation failed: {}. Send 1 boot to {} to activate it manually.",
+                        e,
+                        address
+                    );
+                }
+            }
+        } else if !json {
+            println!(" OK");
+        }
+    }
+
     // Fetch difficulty from contract (unless overridden)
     let difficulty = if let Some(d) = difficulty_override {
         if !json {

@@ -126,6 +126,10 @@ pub struct DifficultyResponse {
 pub struct RpcClient {
     config: RpcConfig,
     http_client: reqwest::Client,
+    /// Cached account number (set after first query)
+    cached_account_number: std::cell::Cell<Option<u64>>,
+    /// Local sequence counter (incremented after each successful broadcast)
+    local_sequence: std::cell::Cell<Option<u64>>,
 }
 
 impl RpcClient {
@@ -134,6 +138,8 @@ impl RpcClient {
         Self {
             config: RpcConfig::default(),
             http_client: reqwest::Client::new(),
+            cached_account_number: std::cell::Cell::new(None),
+            local_sequence: std::cell::Cell::new(None),
         }
     }
 
@@ -142,6 +148,8 @@ impl RpcClient {
         Self {
             config,
             http_client: reqwest::Client::new(),
+            cached_account_number: std::cell::Cell::new(None),
+            local_sequence: std::cell::Cell::new(None),
         }
     }
 
@@ -219,8 +227,17 @@ impl RpcClient {
         use cosmrs::tx::{Body, Fee, Msg, SignDoc, SignerInfo};
         use cosmrs::{AccountId, Coin};
 
-        // Get account info
-        let (account_number, sequence) = self.get_account_info(&proof.miner_address).await?;
+        // Get account info — use cached sequence to avoid stale on-chain reads
+        let (account_number, sequence) = if let (Some(acc), Some(seq)) =
+            (self.cached_account_number.get(), self.local_sequence.get())
+        {
+            (acc, seq)
+        } else {
+            let (acc, seq) = self.get_account_info(&proof.miner_address).await?;
+            self.cached_account_number.set(Some(acc));
+            self.local_sequence.set(Some(seq));
+            (acc, seq)
+        };
 
         // Build execute message
         let execute_msg = ExecuteMsg::SubmitProof {
@@ -292,6 +309,9 @@ impl RpcClient {
         // Broadcast
         let tx_hash = self.broadcast_tx(tx_bytes).await?;
 
+        // Increment local sequence for next TX
+        self.local_sequence.set(Some(sequence + 1));
+
         Ok(SubmitResult {
             tx_hash,
             accepted: true,
@@ -347,6 +367,40 @@ impl RpcClient {
             as u32;
 
         Ok(difficulty)
+    }
+
+    /// Check if an account exists on-chain
+    pub async fn account_exists(&self, address: &str) -> bool {
+        let url = format!(
+            "{}/cosmos/auth/v1beta1/accounts/{}",
+            self.config.lcd_url, address
+        );
+
+        let Ok(resp) = self.http_client.get(&url).send().await else {
+            return false;
+        };
+        let Ok(json) = resp.json::<serde_json::Value>().await else {
+            return false;
+        };
+        // Non-existent accounts return {"code":5, ...} without "account" field
+        json.get("account").is_some()
+    }
+
+    /// Activate a new account via the activation service (sends 1 boot)
+    pub async fn activate_account(&self, address: &str) -> Result<()> {
+        let url = format!(
+            "https://bostrom.cybernode.ai/activate?address={}",
+            address
+        );
+
+        let resp: serde_json::Value = self.http_client.get(&url).send().await?.json().await?;
+
+        if resp["ok"].as_bool() == Some(true) {
+            Ok(())
+        } else {
+            let error = resp["error"].as_str().unwrap_or("unknown error");
+            anyhow::bail!("Account activation failed: {}", error)
+        }
     }
 
     /// Query the minimum profitable difficulty
