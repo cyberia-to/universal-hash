@@ -93,13 +93,17 @@ pub enum QueryMsg {
 }
 
 /// Config response from contract
+/// Supports both production (epoch_duration) and test (period_duration) field names.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigResponse {
     pub token_denom: String,
     pub difficulty: u32,
     pub base_reward: String,
     pub max_proof_age: u64,
+    #[serde(alias = "epoch_duration")]
     pub period_duration: u64,
+    #[serde(default)]
+    pub target_proofs_per_window: Option<u64>,
     pub admin: String,
     pub paused: bool,
 }

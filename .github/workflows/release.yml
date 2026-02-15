@@ -102,6 +102,7 @@ jobs:
 
       - name: Publish to npm
         if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         run: |
           echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > crates/web/pkg/.npmrc
           wasm-pack publish crates/web

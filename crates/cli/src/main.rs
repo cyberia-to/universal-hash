@@ -505,10 +505,7 @@ fn cmd_mine(
                         println!("{}", serde_json::to_string(&event)?);
                     } else {
                         println!("Proof accepted! TX: {}", result.tx_hash);
-                        println!(
-                            "View: https://cyb.ai/network/bostrom/tx/{}",
-                            result.tx_hash
-                        );
+                        println!("View: https://cyb.ai/network/bostrom/tx/{}", result.tx_hash);
                     }
                 }
                 Err(e) => {
